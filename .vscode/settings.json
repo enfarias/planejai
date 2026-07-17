@@ -3,6 +3,7 @@
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit",
+    "source.addMissingImports": "always",
     "source.organizeImports": "never"
   },
   "eslint.useFlatConfig": true,
