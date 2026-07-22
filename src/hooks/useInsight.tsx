@@ -1,89 +1,71 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { buildAIPrompt } from '@/data/aiPrompt'
+import type { SimulationRecord } from '@/data/simulation'
+import { useSimulationStorage } from '@/hooks/useSimulationStorage'
 import { getInsight, type InsightData } from '@/services/aiService'
 
-import { useSimulationStorage } from './useSimulationStorage'
-
 export const useInsight = (id: string) => {
-  const [insight, setInsight] = useState<InsightData | null>(null)
+  const isRequestPending = useRef(false)
+
+  const { getFormData, updateSimulation } = useSimulationStorage()
+
+  const [insight, setInsight] = useState<InsightData | null>(() => {
+    if (!id) return null
+    const simulation = getFormData(id)
+
+    if (simulation?.insight) {
+      return simulation.insight as InsightData
+    }
+
+    return null
+  })
+
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const { getFormData } = useSimulationStorage()
-
   // Necessário o uso do useCallback pois temos que colocar essa função
   // Como array de dependências do useEffect
-  const fetchInsight = useCallback(async () => {
-    if (!id) return
-
-    // Garantimos o estado de loading antes da chamada assíncrona
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const simulation = getFormData(id)
+  const fetchInsight = useCallback(
+    async (simulationId: string) => {
+      const simulation = getFormData(simulationId)
 
       if (!simulation) {
         setError('Simulação não encontrada.')
-        setIsLoading(false)
         return
       }
 
-      const prompt = buildAIPrompt(simulation)
-      const data = await getInsight(prompt)
-      setInsight(data)
-    } catch {
-      setError('Erro ao gerar o diagnóstico. Tente novamente.')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [id, getFormData])
-
-  useEffect(() => {
-    // Guard de parada simples sem dependências reativas de estado interno
-    if (!id || insight) {
-      return
-    }
-
-    // flag para evitar atualização de estado se o componente for desmontado
-    let isMounted = true
-
-    const loadData = async () => {
+      isRequestPending.current = true
       setIsLoading(true)
       setError(null)
 
       try {
-        const simulation = getFormData(id)
-
-        if (!simulation) {
-          if (isMounted) setError('Simulação não encontrada.')
-          return
-        }
-
         const prompt = buildAIPrompt(simulation)
         const data = await getInsight(prompt)
+        setInsight(data)
 
-        if (isMounted) {
-          setInsight(data)
-        }
+        updateSimulation(simulationId, {
+          ...simulation,
+          insight: data,
+        } as SimulationRecord)
       } catch {
-        if (isMounted) {
-          setError('Erro ao gerar o diagnóstico. Tente novamente.')
-        }
+        setError('Erro ao gerar o diagnóstico. Tente novamente.')
       } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
+        isRequestPending.current = false
+        setIsLoading(false)
       }
+    },
+    [getFormData, updateSimulation],
+  )
+
+  useEffect(() => {
+    // Evita loop infinito de requisições para a API do Gemini
+    if (insight || isLoading || error || isRequestPending.current) {
+      return
     }
 
-    void loadData()
+    fetchInsight(id)
+  }, [id, insight, isLoading, error, fetchInsight])
 
-    return () => {
-      isMounted = false
-    }
-  }, [id, getFormData, insight])
-
-  return { insight, isLoading, error, refetch: fetchInsight }
+  return { insight, isLoading, error, fetchInsight }
 }
